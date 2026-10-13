@@ -6,7 +6,11 @@ import cookieParser from "cookie-parser";
 
 import { env } from "./config/env.js";
 import healthRouter from "./routes/health.route.js";
+import authRouter from "./routes/auth.route.js";
+import usersRouter from "./routes/users.route.js";
+import { apiRateLimit } from "./middlewares/rateLimit.middleware.js";
 import { notFound, globalError } from "./middlewares/error.middleware.js";
+
 
 const app = express();
 
@@ -37,10 +41,16 @@ app.use(cookieParser());
 app.use(compression());
 
 // 5. مسارات الفحص الحيوي لحالة النظام
-app.use("/api/health", healthRouter);
-app.use("/health", healthRouter);
 
-// 6. وسيط معالجة المسارات غير الموجودة (404) والمعالج العام للأخطاء
+
+// 6. تحديد المعدل العام لواجهات برمجة التطبيقات
+app.use("/api", apiRateLimit);
+
+// 7. مسارات المصادقة والمستخدمين
+app.use("/api/auth", authRouter);
+app.use("/api/users", usersRouter);
+
+// 8. وسيط معالجة المسارات غير الموجودة (404) والمعالج العام للأخطاء
 app.use(notFound);
 app.use(globalError);
 
