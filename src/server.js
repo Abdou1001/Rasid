@@ -4,30 +4,41 @@ import { env } from "./config/env.js";
 const PORT = env.PORT || 5000;
 
 const server = app.listen(PORT, () => {
-    console.log(`🚀 خادم نظام إدارة الهواتف المفقودة يعمل في وضع ${env.NODE_ENV} على المنفذ ${PORT}`);
+    console.log(
+        `🚀 Lost Phone Reporting System server is running in ${env.NODE_ENV} mode on port ${PORT}`
+    );
 });
 
-// التعامل مع الوعود المرفوضة غير المعالجة
+// Handle unhandled promise rejections
 process.on("unhandledRejection", (err) => {
-    console.error("💥 خطأ غير معالج (Unhandled Rejection)! يتم إيقاف الخادم بأمان...");
+    console.error(
+        "💥 Unhandled Rejection! Shutting down the server gracefully..."
+    );
     console.error(err);
+
     server.close(() => {
         process.exit(1);
     });
 });
 
-// التعامل مع الاستثناءات غير الملتقطة
+// Handle uncaught exceptions
 process.on("uncaughtException", (err) => {
-    console.error("💥 استثناء غير ملتقط (Uncaught Exception)! يتم إيقاف الخادم فوراً...");
+    console.error(
+        "💥 Uncaught Exception! Shutting down the server immediately..."
+    );
     console.error(err);
+
     process.exit(1);
 });
 
-// الإيقاف الآمن للخادم عند استقبال إشارات الإنهاء
+// Gracefully shut down the server when receiving termination signals
 const handleShutdown = (signal) => {
-    console.log(`\n🛑 تم استقبال إشارة ${signal}. يتم إغلاق خادم HTTP...`);
+    console.log(
+        `\n🛑 Received ${signal}. Closing HTTP server...`
+    );
+
     server.close(() => {
-        console.log("تم إغلاق خادم HTTP بنجاح.");
+        console.log("HTTP server closed successfully.");
         process.exit(0);
     });
 };

@@ -28,8 +28,8 @@ after(async () => {
 });
 
 describe("Express App Route Mounting & Global Error Handling", () => {
-    test("GET /api/health responds with 200", async () => {
-        const res = await fetch(`${baseUrl}/api/health`);
+    test("GET /api/police-stations responds with 200", async () => {
+        const res = await fetch(`${baseUrl}/api/police-stations`);
         const json = await res.json();
         assert.equal(res.status, 200);
         assert.equal(json.status, "success");

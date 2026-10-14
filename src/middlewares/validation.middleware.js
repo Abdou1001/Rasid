@@ -1,7 +1,7 @@
 import AsyncHandler from "express-async-handler";
 
 /**
- * وسيط التحقق من صحة مدخلات الطلب باستخدام Zod
+ * وسيط التحقق من صحة مدخلات الطلب (Body) باستخدام Zod
  * يقوم بتمرير الأخطاء تلقائياً إلى معالج الأخطاء العام
  */
 export const validate = (schema) =>
@@ -10,4 +10,18 @@ export const validate = (schema) =>
         next();
     });
 
-export default validate;
+/**
+ * وسيط التحقق من صحة معاملات الاستعلام (Query Parameters) باستخدام Zod
+ * يراعي أن req.query في Express 5 يحتوي على getter فقط عبر استخدام Object.assign
+ */
+export const validateQuery = (schema) =>
+    AsyncHandler(async (req, res, next) => {
+        const parsed = await schema.parseAsync(req.query);
+        Object.assign(req.query, parsed);
+        next();
+    });
+
+export default {
+    validate,
+    validateQuery,
+};

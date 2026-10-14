@@ -10,6 +10,7 @@ export const CACHE_KEYS = {
     // أقسام الشرطة
     POLICE_STATIONS: "police_stations:all",
     POLICE_STATION: (id) => `police_stations:${id}`,
+    POLICE_STATIONS_LIST: (queryString = "default") => `police_stations:list:${queryString}`,
 
     // إحصائيات لوحة التحكم
     DASHBOARD_STATS: "dashboard:stats",

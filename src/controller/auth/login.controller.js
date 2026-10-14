@@ -35,6 +35,7 @@ export const login = AsyncHandler(async (req, res, next) => {
         return next(new ApiError("رقم الهاتف أو كلمة المرور غير صحيحة", 401));
     }
 
+
     // 5. التحقق من حالة الحساب: رفض الحسابات المجمدة
     if (!user.status) {
         return next(new ApiError("تم تجميد هذا الحساب، يرجى التواصل مع الإدارة", 403));
