@@ -26,7 +26,7 @@ export const protect = AsyncHandler(async (req, res, next) => {
     const token = extractToken(req);
 
     if (!token) {
-        return next(new ApiError("يرجى تسجيل الدخول للوصول إلى هذا المورد", 401));
+        return next(new ApiError("يرجى تسجيل الدخول ", 401));
     }
 
     // التحقق من صحة وصلاحية رمز JWT

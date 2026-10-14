@@ -17,8 +17,6 @@ export const updatePoliceStationStatus = AsyncHandler(async (req, res, next) => 
         return next(new ApiError("معرف قسم الشرطة غير صالح", 400));
     }
 
-    const { is_active } = req.body;
-
     // 2. التحقق من وجود السجل في قاعدة البيانات
     const { data: existingStation, error: checkError } = await supabase
         .from("police_stations")
@@ -34,11 +32,13 @@ export const updatePoliceStationStatus = AsyncHandler(async (req, res, next) => 
         return next(new ApiError("قسم الشرطة غير موجود", 404));
     }
 
-    // 3. تحديث حالة التفعيل وحقل updated_at دون حذف السجل
+    // 3. تبديل حالة التفعيل تلقائياً (Toggle) دون الحاجة لإرسال بيانات في الـ body
+    const newStatus = !existingStation.is_active;
+
     const { data: updatedStation, error: updateError } = await supabase
         .from("police_stations")
         .update({
-            is_active,
+            is_active: newStatus,
             updated_at: new Date().toISOString(),
         })
         .eq("id", stationId)
@@ -60,7 +60,7 @@ export const updatePoliceStationStatus = AsyncHandler(async (req, res, next) => 
 
         await supabase.from("audit_logs").insert({
             user_id: req.user.id,
-            action: is_active ? "ACTIVATE_POLICE_STATION" : "DEACTIVATE_POLICE_STATION",
+            action: newStatus ? "ACTIVATE_POLICE_STATION" : "DEACTIVATE_POLICE_STATION",
             entity_type: "police_stations",
             entity_id: stationId,
             old_data: { is_active: existingStation.is_active },
@@ -75,7 +75,7 @@ export const updatePoliceStationStatus = AsyncHandler(async (req, res, next) => 
     // 6. إرجاع الرد القياسي
     return sendSuccess(res, {
         statusCode: 200,
-        message: is_active
+        message: newStatus
             ? "تم تفعيل قسم الشرطة بنجاح"
             : "تم تعطيل قسم الشرطة بنجاح",
         results: updatedStation,

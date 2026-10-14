@@ -55,8 +55,9 @@ export const createUser = AsyncHandler(async (req, res, next) => {
         return next(new ApiError("فشل في إنشاء حساب المتجر في قاعدة البيانات", 500));
     }
 
-    // 4. إبطال الكاش الخاص بقوائم المستخدمين
+    // 4. إبطال الكاش الخاص بقوائم المستخدمين وإحصائيات لوحة التحكم
     await deleteByPattern("users:*");
+    await deleteByPattern("dashboard:*");
 
     // 5. إرجاع الرد القياسي بالحساب المنشأ بدون كلمة المرور المشفرة
     return sendSuccess(res, {

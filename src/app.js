@@ -8,6 +8,8 @@ import { env } from "./config/env.js";
 import authRouter from "./routes/auth.route.js";
 import usersRouter from "./routes/users.route.js";
 import policeStationsRouter from "./routes/policeStations.route.js";
+import lostPhonesRouter from "./routes/lostPhones.route.js";
+import dashboardRouter from "./routes/dashboard.route.js";
 import { apiRateLimit } from "./middlewares/rateLimit.middleware.js";
 import { notFound, globalError } from "./middlewares/error.middleware.js";
 
@@ -46,6 +48,8 @@ app.use("/api", apiRateLimit);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/police-stations", policeStationsRouter);
+app.use("/api/lost-phones", lostPhonesRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 // 7. وسيط معالجة المسارات غير الموجودة (404) والمعالج العام للأخطاء
 app.use(notFound);

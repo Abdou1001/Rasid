@@ -35,6 +35,10 @@ export const login = AsyncHandler(async (req, res, next) => {
         return next(new ApiError("رقم الهاتف أو كلمة المرور غير صحيحة", 401));
     }
 
+    // 4. التحقق من الدور: هذه البوابة مخصصة لحسابات المحلات التجارية (user) فقط
+    if (user.role !== "user") {
+        return next(new ApiError("هذه البوابة مخصصة للمحلات التجارية فقط", 403));
+    }
 
     // 5. التحقق من حالة الحساب: رفض الحسابات المجمدة
     if (!user.status) {

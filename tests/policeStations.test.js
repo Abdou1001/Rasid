@@ -9,12 +9,14 @@ import ApiError from "../src/utils/ApiError.js";
 
 // Schemas
 import { getPoliceStationsSchema } from "../src/validations/policeStations/getPoliceStations.js";
+import { getPoliceStationsDashboardSchema } from "../src/validations/policeStations/getPoliceStationsDashboard.js";
 import { createPoliceStationSchema } from "../src/validations/policeStations/createPoliceStation.js";
 import { updatePoliceStationSchema } from "../src/validations/policeStations/updatePoliceStation.js";
 import { updatePoliceStationStatusSchema } from "../src/validations/policeStations/updatePoliceStationStatus.js";
 
 // Controllers
 import { getPoliceStations } from "../src/controller/policeStations/getPoliceStations.controller.js";
+import { getPoliceStationsDashboard } from "../src/controller/policeStations/getPoliceStationsDashboard.controller.js";
 import { getPoliceStationById } from "../src/controller/policeStations/getPoliceStationById.controller.js";
 import { createPoliceStation } from "../src/controller/policeStations/createPoliceStation.controller.js";
 import { updatePoliceStation } from "../src/controller/policeStations/updatePoliceStation.controller.js";
@@ -277,7 +279,7 @@ describe("2. Police Stations Unit & Controller Logic", () => {
         assert.equal(res.jsonData.results.station_name, "قسم جديد");
     });
 
-    test("updatePoliceStationStatus modifies is_active", async () => {
+    test("updatePoliceStationStatus toggles is_active without body payload", async () => {
         const existingStation = { id: 5, is_active: true };
         const updatedStation = { id: 5, is_active: false };
 
@@ -291,7 +293,7 @@ describe("2. Police Stations Unit & Controller Logic", () => {
         const { req, res, next, getNext } = createMockReqRes({
             user: { id: "admin-uuid", role: "admin" },
             params: { id: "5" },
-            body: { is_active: false },
+            body: {},
         });
 
         await updatePoliceStationStatus(req, res, next);
@@ -299,6 +301,24 @@ describe("2. Police Stations Unit & Controller Logic", () => {
         assert.equal(res.statusCode, 200);
         assert.equal(res.jsonData.results.is_active, false);
         assert.ok(res.jsonData.message.includes("تعطيل"));
+    });
+
+    test("getPoliceStationsDashboard returns all stations including inactive ones", async () => {
+        const mockStations = [
+            { id: 1, station_name: "قسم 1", is_active: true },
+            { id: 2, station_name: "قسم 2", is_active: false },
+        ];
+        supabase.from = () => createMockSupabaseBuilder({ data: mockStations, count: 2 });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            query: { page: 1, limit: 10 },
+        });
+
+        await getPoliceStationsDashboard(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.length, 2);
     });
 
     supabase.from = originalFrom;
