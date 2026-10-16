@@ -32,10 +32,10 @@ export const getLostPhoneById = AsyncHandler(async (req, res, next) => {
         }
     }
 
-    // 3. الاستعلام من قاعدة البيانات مع جلب الصور المرتبطة
+    // 3. الاستعلام من قاعدة البيانات مع جلب الصور المرتبطة وبيانات ناشر البلاغ
     const { data: report, error } = await supabase
         .from("lost_phones")
-        .select("*, phone_images(*)")
+        .select("*, phone_images(*), user:users!created_by(owner_name, shop_name, phone, area, address)")
         .eq("id", reportId)
         .maybeSingle();
 
@@ -50,6 +50,11 @@ export const getLostPhoneById = AsyncHandler(async (req, res, next) => {
     // 4. تطبيق قواعد الرؤية والخصوصية
     const isCreator = req.user && req.user.id === report.created_by;
     const now = new Date();
+
+    // حظر البلاغات المحذوفة منطقياً عن المستخدمين العاديين
+    if (report.is_deleted && !isAdmin) {
+        return next(new ApiError("بلاغ الهاتف غير موجود", 404));
+    }
 
     if (!isAdmin && !isCreator) {
         // حظر البلاغات المخفية
@@ -71,8 +76,8 @@ export const getLostPhoneById = AsyncHandler(async (req, res, next) => {
         }
     }
 
-    // 5. حفظ في الكاش للبلاغات العامة النشطة
-    if (!isAdmin && report.status === "lost") {
+    // 5. حفظ في الكاش للبلاغات العامة النشطة غير المحذوفة
+    if (!isAdmin && report.status === "lost" && !report.is_deleted) {
         await setCache(cacheKey, report, CACHE_TTL.LOST_PHONES);
     }
 

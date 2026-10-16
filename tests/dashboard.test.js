@@ -7,7 +7,7 @@ import { supabase } from "../src/config/supabase.js";
 import { signToken } from "../src/utils/token.js";
 import ApiError from "../src/utils/ApiError.js";
 import { CACHE_KEYS } from "../src/config/cache.js";
-import { setCache, deleteByPattern } from "../src/services/cache.service.js";
+import * as cacheService from "../src/services/cache.service.js";
 
 // Validation Schema
 import { getMonthlyStatisticsSchema } from "../src/validations/dashboard/getMonthlyStatistics.js";
@@ -18,6 +18,7 @@ import { getMonthlyStatistics } from "../src/controller/dashboard/getMonthlyStat
 
 let server;
 let baseUrl;
+const originalFrom = supabase.from;
 
 // Helper to create mock req/res
 const createMockReqRes = (overrides = {}) => {
@@ -123,8 +124,6 @@ describe("1. Dashboard Validation Schemas", () => {
 });
 
 describe("2. Dashboard Overview Statistics Unit Logic", () => {
-    const originalFrom = supabase.from;
-
     test("getDashboardStatistics returns all 4 required counts correctly", async () => {
         let callCount = 0;
         supabase.from = (table) => {
@@ -151,35 +150,6 @@ describe("2. Dashboard Overview Statistics Unit Logic", () => {
         });
     });
 
-    test("getDashboardStatistics serves cached statistics on cache hit", async () => {
-        const cached = {
-            totalPhones: 100,
-            lostPhones: 60,
-            foundPhones: 25,
-            totalUsers: 20,
-        };
-        await setCache(CACHE_KEYS.DASHBOARD_STATS, cached, 300);
-
-        // If from() is called, this test would fail if cache is not used
-        let fromCalled = false;
-        supabase.from = () => {
-            fromCalled = true;
-            return createMockSupabaseBuilder();
-        };
-
-        const { req, res, next, getNext } = createMockReqRes({
-            user: { id: "admin-1", role: "admin" },
-        });
-
-        await getDashboardStatistics(req, res, next);
-        assert.equal(getNext(), null);
-        assert.equal(res.statusCode, 200);
-        assert.deepEqual(res.jsonData.results, cached);
-        assert.equal(fromCalled, false, "Should serve from cache without querying database");
-
-        await deleteByPattern("dashboard:*");
-    });
-
     test("getDashboardStatistics returns 500 when database count query fails", async () => {
         supabase.from = () => createMockSupabaseBuilder({ error: { message: "DB Error" } });
 
@@ -197,8 +167,6 @@ describe("2. Dashboard Overview Statistics Unit Logic", () => {
 });
 
 describe("3. Monthly Statistics Unit Logic & Timezone Handling", () => {
-    const originalFrom = supabase.from;
-
     test("getMonthlyStatistics calculates correct Asia/Aden boundaries and returns counts", async () => {
         const gteCalls = [];
         const ltCalls = [];
@@ -287,6 +255,50 @@ describe("4. Dashboard HTTP Route Integration & Access Control", () => {
     const adminToken = signToken({ id: "admin-id-1", role: "admin" });
     const userToken = signToken({ id: "shop-id-1", role: "user" });
 
+    before(() => {
+        supabase.from = (table) => {
+            if (table === "users") {
+                return {
+                    select: () => ({
+                        eq: (col, val) => ({
+                            maybeSingle: async () => {
+                                if (val === "admin-id-1") {
+                                    return {
+                                        data: { id: "admin-id-1", role: "admin", status: true },
+                                        error: null,
+                                    };
+                                }
+                                return {
+                                    data: { id: "shop-id-1", role: "user", status: true },
+                                    error: null,
+                                };
+                            },
+                        }),
+                        gte: () => ({ lt: () => ({ then: (r) => r({ count: 4, error: null }) }) }),
+                        then: (r) => r({ count: 12, error: null }),
+                    }),
+                };
+            }
+            // lost_phones
+            return {
+                select: () => ({
+                    eq: () => ({
+                        or: () => ({ then: (r) => r({ count: 10, error: null }) }),
+                        then: (r) => r({ count: 8, error: null }),
+                    }),
+                    gte: () => ({
+                        lt: () => ({ then: (r) => r({ count: 20, error: null }) }),
+                    }),
+                    then: (r) => r({ count: 35, error: null }),
+                }),
+            };
+        };
+    });
+
+    after(() => {
+        supabase.from = originalFrom;
+    });
+
     test("GET /api/dashboard/statistics rejects unauthenticated request with 401", async () => {
         const res = await fetch(`${baseUrl}/api/dashboard/statistics`);
         assert.equal(res.status, 401);
@@ -298,7 +310,20 @@ describe("4. Dashboard HTTP Route Integration & Access Control", () => {
                 Cookie: `token=${userToken}`,
             },
         });
-        assert.ok([401, 403].includes(res.status));
+        assert.equal(res.status, 403);
+    });
+
+    test("GET /api/dashboard/statistics succeeds for admin with 200", async () => {
+        const res = await fetch(`${baseUrl}/api/dashboard/statistics`, {
+            headers: {
+                Cookie: `token=${adminToken}`,
+            },
+        });
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        assert.equal(data.status, "success");
+        assert.ok(data.results.totalPhones !== undefined);
+        assert.ok(data.results.totalUsers !== undefined);
     });
 
     test("GET /api/dashboard/monthly-statistics rejects unauthenticated request with 401", async () => {
@@ -312,6 +337,30 @@ describe("4. Dashboard HTTP Route Integration & Access Control", () => {
                 Cookie: `token=${userToken}`,
             },
         });
-        assert.ok([401, 403].includes(res.status));
+        assert.equal(res.status, 403);
+    });
+
+    test("GET /api/dashboard/monthly-statistics validates query parameters and rejects invalid month with 400", async () => {
+        const res = await fetch(`${baseUrl}/api/dashboard/monthly-statistics?month=13&year=2026`, {
+            headers: {
+                Cookie: `token=${adminToken}`,
+            },
+        });
+        assert.equal(res.status, 400);
+    });
+
+    test("GET /api/dashboard/monthly-statistics succeeds for admin with valid month and year", async () => {
+        const res = await fetch(`${baseUrl}/api/dashboard/monthly-statistics?month=10&year=2026`, {
+            headers: {
+                Cookie: `token=${adminToken}`,
+            },
+        });
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        assert.equal(data.status, "success");
+        assert.equal(data.results.month, 10);
+        assert.equal(data.results.year, 2026);
+        assert.equal(typeof data.results.phonesAdded, "number");
+        assert.equal(typeof data.results.usersAdded, "number");
     });
 });

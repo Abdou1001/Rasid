@@ -15,6 +15,7 @@ export const getLostPhonesDashboard = AsyncHandler(async (req, res, next) => {
         search,
         status,
         is_expired,
+        is_deleted,
         created_from,
         created_to,
     } = req.query;
@@ -22,17 +23,24 @@ export const getLostPhonesDashboard = AsyncHandler(async (req, res, next) => {
     const searchTerm = (keyword || search || "").trim();
     const { from, to, page: parsedPage, limit: parsedLimit } = getPagination(page, limit);
 
-    // 1. بناء استعلام Supabase الشامل مع جلب الصور المرتبطة والعدد الكلي دون قيود خصوصية
+    // 1. بناء استعلام Supabase الشامل مع جلب الصور المرتبطة وبيانات ناشر البلاغ والعدد الكلي دون قيود خصوصية
     let query = supabase
         .from("lost_phones")
-        .select("*, phone_images(*)", { count: "exact" });
+        .select("*, phone_images(*), user:users!created_by(owner_name, shop_name, phone, area, address)", { count: "exact" });
 
     // 2. فلترة الحالة إذا تم تحديدها
     if (status && status !== "all") {
         query = query.eq("status", status);
     }
 
-    // 3. فلترة البلاغات المنتهية أو السارية (بناءً على visible_until)
+    // 3. فلترة الحذف المنطقي إذا تم تحديده
+    if (is_deleted === "true") {
+        query = query.eq("is_deleted", true);
+    } else if (is_deleted === "false") {
+        query = query.eq("is_deleted", false);
+    }
+
+    // 4. فلترة البلاغات المنتهية أو السارية (بناءً على visible_until)
     const now = new Date().toISOString();
     if (is_expired === "true") {
         query = query.lt("visible_until", now);

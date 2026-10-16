@@ -18,8 +18,8 @@ export const getMonthlyStatistics = AsyncHandler(async (req, res, next) => {
         month < 1 ||
         month > 12 ||
         !Number.isInteger(year) ||
-        year < 1000 ||
-        year > 9999
+        year < 2000 ||
+        year > 2999
     ) {
         return next(new ApiError("الشهر أو السنة غير صالحين", 400));
     }
@@ -55,13 +55,13 @@ export const getMonthlyStatistics = AsyncHandler(async (req, res, next) => {
     ] = await Promise.all([
         supabase
             .from("lost_phones")
-            .select("*", { count: "exact", head: true })
+            .select("id", { count: "exact", head: true })
             .gte("created_at", monthStart)
             .lt("created_at", nextMonthStart),
 
         supabase
             .from("users")
-            .select("*", { count: "exact", head: true })
+            .select("id", { count: "exact", head: true })
             .gte("created_at", monthStart)
             .lt("created_at", nextMonthStart),
     ]);

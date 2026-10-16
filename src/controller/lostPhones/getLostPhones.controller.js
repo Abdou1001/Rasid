@@ -40,10 +40,11 @@ export const getLostPhones = AsyncHandler(async (req, res, next) => {
         }
     }
 
-    // 2. بناء استعلام Supabase مع جلب الصور المرتبطة والعدد الإجمالي
+    // 2. بناء استعلام Supabase مع جلب الصور المرتبطة وبيانات ناشر البلاغ والعدد الإجمالي واستبعاد المحذوفة منطقياً
     let query = supabase
         .from("lost_phones")
-        .select("*, phone_images(*)", { count: "exact" });
+        .select("*, phone_images(*), user:users!created_by(owner_name, shop_name, phone, area, address)", { count: "exact" })
+        .eq("is_deleted", false);
 
     // 3. تطبيق قواعد الرؤية والخصوصية
     const now = new Date().toISOString();

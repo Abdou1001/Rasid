@@ -15,6 +15,7 @@ export const CACHE_KEYS = {
     // بلاغات الهواتف المفقودة
     LOST_PHONE: (id) => `lost_phones:${id}`,
     LOST_PHONES_LIST: (queryKey = "default") => `lost_phones:list:${queryKey}`,
+    MY_LOST_PHONES: (userId, queryKey = "default") => `lost_phones:my:${userId}:${queryKey}`,
 
     // إحصائيات لوحة التحكم
     DASHBOARD_STATS: "dashboard:stats",
