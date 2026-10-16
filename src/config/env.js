@@ -12,6 +12,8 @@ const envSchema = z.object({
     JWT_EXPIRES_IN: z.string().default("7d"),
     FRONTEND_URL: z.string().default("http://localhost:3000"),
     REDIS_URL: z.string().optional(),
+    REDIS_HOST: z.string().optional(),
+    REDIS_PORT: z.coerce.number().optional(),
     STORAGE_BUCKET_NAME: z.string().default("phone-images"),
 });
 
