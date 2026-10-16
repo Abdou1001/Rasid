@@ -19,10 +19,10 @@ export const updateLostPhoneStatus = AsyncHandler(async (req, res, next) => {
 
     const { status, reason } = req.body;
 
-    // 2. التحقق من وجود السجل في قاعدة البيانات
+    // 2. التحقق من وجود السجل في قاعدة البيانات بجلب الحقول الأساسية فقط للسرعة والكفاءة
     const { data: existingReport, error: checkError } = await supabase
         .from("lost_phones")
-        .select("*")
+        .select("id, status, is_deleted, created_by")
         .eq("id", phoneId)
         .maybeSingle();
 
@@ -32,6 +32,11 @@ export const updateLostPhoneStatus = AsyncHandler(async (req, res, next) => {
 
     if (!existingReport) {
         return next(new ApiError("بلاغ الهاتف غير موجود", 404));
+    }
+
+    // التحقق من الحذف المنطقي: لا يمكن تغيير حالة بلاغ محذوف
+    if (existingReport.is_deleted === true) {
+        return next(new ApiError("بلاغ الهاتف غير موجود أو تم حذفه", 404));
     }
 
     // 3. التحقق من الصلاحيات وقواعد الانتقال بين الحالات
@@ -85,17 +90,24 @@ export const updateLostPhoneStatus = AsyncHandler(async (req, res, next) => {
         updatePayload.hidden_by = null;
     }
 
-    // 5. تحديث السجل في جدول lost_phones
+    // 5. تحديث السجل في جدول lost_phones (باستخدام select مباشر دون دمج العلاقات لتفادي قيود PostgREST)
     const { data: updatedReport, error: updateError } = await supabase
         .from("lost_phones")
         .update(updatePayload)
         .eq("id", phoneId)
-        .select("*, phone_images(*)")
+        .select()
         .single();
 
     if (updateError || !updatedReport) {
+        console.error("⚠️ فشل في تحديث حالة بلاغ الهاتف:", updateError);
         return next(new ApiError("فشل في تحديث حالة بلاغ الهاتف", 500));
     }
+
+    // جلب صور الهاتف المرتبطة
+    const { data: images } = await supabase
+        .from("phone_images")
+        .select("*")
+        .eq("phone_id", phoneId);
 
     // 6. تسجيل العملية في جدول تاريخ الحالات (report_status_history)
     try {
@@ -144,7 +156,10 @@ export const updateLostPhoneStatus = AsyncHandler(async (req, res, next) => {
     return sendSuccess(res, {
         statusCode: 200,
         message: statusMessages[status] || "تم تحديث حالة البلاغ بنجاح",
-        results: updatedReport,
+        results: {
+            ...updatedReport,
+            phone_images: images || [],
+        },
     });
 });
 
