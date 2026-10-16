@@ -17,6 +17,10 @@ import { adminLoginSchema } from "../src/validations/auth/adminLogin.js";
 import { changePasswordSchema } from "../src/validations/auth/changePassword.js";
 import { forgotPasswordSchema } from "../src/validations/auth/forgotPassword.js";
 import { createUserSchema } from "../src/validations/users/createUser.js";
+import { updateProfileSchema } from "../src/validations/users/updateProfile.js";
+import { adminChangePasswordSchema } from "../src/validations/users/adminChangePassword.js";
+import { updateUserStatusSchema } from "../src/validations/users/updateUserStatus.js";
+import { getUsersSchema } from "../src/validations/users/getUsers.js";
 
 // Middlewares
 import { protect, allowedTo, optionalAuth } from "../src/middlewares/auth.middleware.js";
@@ -29,6 +33,11 @@ import { getMe } from "../src/controller/auth/getMe.controller.js";
 import { changePassword } from "../src/controller/auth/changePassword.controller.js";
 import { forgotPassword } from "../src/controller/auth/forgotPassword.controller.js";
 import { createUser } from "../src/controller/users/createUser.controller.js";
+import { updateProfile } from "../src/controller/users/updateProfile.controller.js";
+import { adminChangePassword } from "../src/controller/users/adminChangePassword.controller.js";
+import { updateUserStatus } from "../src/controller/users/updateUserStatus.controller.js";
+import { getUsers } from "../src/controller/users/getUsers.controller.js";
+import { getUserById } from "../src/controller/users/getUserById.controller.js";
 
 after(() => {
     // إغلاق اتصال Redis حتى لا يعلق Event Loop أثناء الفحص
@@ -83,12 +92,21 @@ const createMockReqRes = (overrides = {}) => {
 };
 
 // Builder for Mock Supabase
-const createMockSupabaseBuilder = (result = { data: null, error: null }) => {
+const createMockSupabaseBuilder = (result = { data: null, error: null, count: 0 }) => {
     const builder = {
         select: () => builder,
         insert: () => builder,
         update: () => builder,
         eq: () => builder,
+        or: () => builder,
+        gte: () => builder,
+        lte: () => builder,
+        order: () => builder,
+        range: async () => ({
+            data: result.data || [],
+            error: result.error || null,
+            count: result.count !== undefined ? result.count : (result.data ? result.data.length : 0),
+        }),
         maybeSingle: async () => result,
         single: async () => result,
     };
@@ -560,3 +578,320 @@ describe("5. Authentication Controllers", () => {
 
     supabase.from = originalFrom;
 });
+
+describe("6. User Profile & Admin User Management", () => {
+    const originalFrom = supabase.from;
+
+    test("updateProfileSchema rejects empty body and accepts partial updates", async () => {
+        await assert.rejects(async () => {
+            await updateProfileSchema.parseAsync({});
+        });
+
+        const valid = await updateProfileSchema.parseAsync({
+            shop_name: "محل النور",
+            owner_name: "محمد أحمد",
+        });
+        assert.equal(valid.shop_name, "محل النور");
+        assert.equal(valid.owner_name, "محمد أحمد");
+    });
+
+    test("updateProfile allows user to update shop_name and owner_name", async () => {
+        const existingUser = {
+            id: "user-uuid-1",
+            shop_name: "محل القديم",
+            owner_name: "أحمد",
+            phone: "771234567",
+            status: true,
+            role: "user",
+        };
+        const updatedUser = {
+            ...existingUser,
+            shop_name: "محل النور للاتصالات",
+            owner_name: "أحمد علي",
+        };
+
+        let callCount = 0;
+        supabase.from = () => {
+            callCount++;
+            if (callCount === 1) {
+                // Existence check
+                return createMockSupabaseBuilder({ data: existingUser });
+            }
+            // Update
+            return createMockSupabaseBuilder({ data: updatedUser });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "user-uuid-1", role: "user" },
+            body: {
+                shop_name: "محل النور للاتصالات",
+                owner_name: "أحمد علي",
+            },
+        });
+
+        await updateProfile(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.shop_name, "محل النور للاتصالات");
+        assert.equal(res.jsonData.results.owner_name, "أحمد علي");
+    });
+
+    test("adminChangePasswordSchema requires matching passwords with min 6 chars", async () => {
+        await assert.rejects(async () => {
+            await adminChangePasswordSchema.parseAsync({
+                password: "123",
+                password_confirm: "123",
+            });
+        });
+
+        await assert.rejects(async () => {
+            await adminChangePasswordSchema.parseAsync({
+                password: "password123",
+                password_confirm: "different123",
+            });
+        });
+
+        const valid = await adminChangePasswordSchema.parseAsync({
+            password: "newPassword123",
+            password_confirm: "newPassword123",
+        });
+        assert.equal(valid.password, "newPassword123");
+    });
+
+    test("adminChangePassword allows admin to change password for any user", async () => {
+        const targetUser = {
+            id: "a0000000-0000-4000-8000-000000000001",
+            shop_name: "محل التجربة",
+            role: "user",
+        };
+
+        supabase.from = (table) => {
+            if (table === "users") return createMockSupabaseBuilder({ data: targetUser });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "a0000000-0000-4000-8000-000000000001" },
+            body: { password: "adminChangedPass123" },
+        });
+
+        await adminChangePassword(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.user_id, "a0000000-0000-4000-8000-000000000001");
+    });
+
+    test("adminChangePassword rejects invalid UUID with 400", async () => {
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "invalid-uuid" },
+            body: { password: "adminChangedPass123" },
+        });
+
+        await adminChangePassword(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+    });
+
+    test("updateUserStatus allows admin to suspend user account", async () => {
+        const existingUser = {
+            id: "b0000000-0000-4000-8000-000000000002",
+            status: true,
+            role: "user",
+            shop_name: "محل الشرق",
+        };
+        const updatedUser = { ...existingUser, status: false };
+
+        let callCount = 0;
+        supabase.from = (table) => {
+            if (table === "users") {
+                callCount++;
+                if (callCount === 1) return createMockSupabaseBuilder({ data: existingUser });
+                return createMockSupabaseBuilder({ data: updatedUser });
+            }
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "b0000000-0000-4000-8000-000000000002" },
+            body: { status: false, reason: "مخالفة الشروط" },
+        });
+
+        await updateUserStatus(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.status, false);
+    });
+
+    test("updateUserStatus prevents admin from suspending own account with 400", async () => {
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid-1234-4000-8000-000000000000", role: "admin" },
+            params: { id: "admin-uuid-1234-4000-8000-000000000000" },
+            body: { status: false },
+        });
+
+        await updateUserStatus(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+    });
+
+    test("updateUserStatus allows admin to activate suspended user account", async () => {
+        const existingUser = {
+            id: "b0000000-0000-4000-8000-000000000003",
+            status: false,
+            role: "user",
+            shop_name: "محل الغرب",
+        };
+        const updatedUser = { ...existingUser, status: true };
+
+        let callCount = 0;
+        supabase.from = (table) => {
+            if (table === "users") {
+                callCount++;
+                if (callCount === 1) return createMockSupabaseBuilder({ data: existingUser });
+                return createMockSupabaseBuilder({ data: updatedUser });
+            }
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "b0000000-0000-4000-8000-000000000003" },
+            body: { status: true },
+        });
+
+        await updateUserStatus(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.status, true);
+    });
+
+    supabase.from = originalFrom;
+});
+
+describe("9. Users Retrieval (getUsers & getUserById)", () => {
+    const originalFrom = supabase.from;
+
+    test("getUsersSchema parses pagination and filter parameters", async () => {
+        const parsed = await getUsersSchema.parseAsync({
+            page: "2",
+            limit: "25",
+            search: "الأمل",
+            role: "user",
+            status: "true",
+        });
+        assert.equal(parsed.page, 2);
+        assert.equal(parsed.limit, 25);
+        assert.equal(parsed.search, "الأمل");
+        assert.equal(parsed.role, "user");
+        assert.equal(parsed.status, "true");
+    });
+
+    test("getUsers returns paginated list of users for admin", async () => {
+        const mockUsers = [
+            { id: "10000000-0000-4000-8000-000000000001", shop_name: "محل 1", role: "user" },
+            { id: "10000000-0000-4000-8000-000000000002", shop_name: "محل 2", role: "user" },
+        ];
+        supabase.from = () => createMockSupabaseBuilder({ data: mockUsers, count: 2 });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            query: { page: 1, limit: 10 },
+        });
+
+        await getUsers(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.length, 2);
+        assert.equal(res.jsonData.pagination.total, 2);
+    });
+
+    test("getUserById allows admin to retrieve any user by UUID", async () => {
+        const mockUser = {
+            id: "20000000-0000-4000-8000-000000000001",
+            shop_name: "متجر القدس",
+            owner_name: "أحمد",
+            phone: "777123456",
+            role: "user",
+        };
+        supabase.from = () => createMockSupabaseBuilder({ data: mockUser });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "20000000-0000-4000-8000-000000000001" },
+        });
+
+        await getUserById(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.id, "20000000-0000-4000-8000-000000000001");
+        assert.equal(res.jsonData.results.shop_name, "متجر القدس");
+    });
+
+    test("getUserById allows account owner to retrieve own data", async () => {
+        const ownerId = "30000000-0000-4000-8000-000000000001";
+        const mockUser = {
+            id: ownerId,
+            shop_name: "متجري",
+            owner_name: "محمود",
+            phone: "777654321",
+            role: "user",
+        };
+        supabase.from = () => createMockSupabaseBuilder({ data: mockUser });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: ownerId, role: "user" },
+            params: { id: ownerId },
+        });
+
+        await getUserById(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.id, ownerId);
+    });
+
+    test("getUserById rejects user attempting to access another user's profile with 403", async () => {
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "30000000-0000-4000-8000-000000000001", role: "user" },
+            params: { id: "40000000-0000-4000-8000-000000000002" },
+        });
+
+        await getUserById(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 403);
+    });
+
+    test("getUserById rejects invalid UUID with 400", async () => {
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "invalid-id-123" },
+        });
+
+        await getUserById(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+    });
+
+    test("getUserById returns 404 when user does not exist", async () => {
+        supabase.from = () => createMockSupabaseBuilder({ data: null });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-uuid", role: "admin" },
+            params: { id: "50000000-0000-4000-8000-000000000001" },
+        });
+
+        await getUserById(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 404);
+    });
+
+    supabase.from = originalFrom;
+});
+

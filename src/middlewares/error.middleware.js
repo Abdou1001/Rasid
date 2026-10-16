@@ -36,7 +36,20 @@ export const globalError = (err, req, res, next) => {
         });
     }
 
-    // 3. تنسيق الأخطاء التشغيلية المخصصة (ApiError)
+    // 3. تنسيق أخطاء رفع الملفات (MulterError)
+    if (err.name === "MulterError") {
+        let message = "خطأ في معالجة الملفات المرفوعة";
+        if (err.code === "LIMIT_FILE_SIZE") message = "حجم الصورة يتجاوز الحد الأقصى المسموح (5 ميجابايت)";
+        if (err.code === "LIMIT_FILE_COUNT") message = "عدد الصور المرفوعة يتجاوز الحد الأقصى المسموح";
+        if (err.code === "LIMIT_UNEXPECTED_FILE") message = "حقل رفع الصور غير متوقع أو تجاوز الحد المسموح به";
+        return res.status(400).json({
+            status: "fail",
+            message,
+            code: err.code,
+        });
+    }
+
+    // 4. تنسيق الأخطاء التشغيلية المخصصة (ApiError)
     if (err instanceof ApiError || err.isOperational) {
         const statusCode = err.statusCode || 500;
         const response = {

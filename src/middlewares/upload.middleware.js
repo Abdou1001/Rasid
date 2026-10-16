@@ -1,4 +1,6 @@
 import multer from "multer";
+import ApiError from "../utils/ApiError.js";
+
 
 // These types allow to upload
 const allowedMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
@@ -26,13 +28,24 @@ const upload = multer({
     },
 });
 
-
-
 // Upload single image
 export const uploadSingleImage = (fieldName) =>
     upload.single(fieldName);
 
+// Upload multiple images (supports 'images', 'image', or any field name up to maxCount)
+export const uploadMultipleImages = (fieldName = "images", maxCount = 5) => {
+    const uploadAny = upload.any();
 
-// Upload multiple images
-export const uploadMultipleImages = (fieldName, maxCount = 5) =>
-    upload.array(fieldName, maxCount);
+    return (req, res, next) => {
+        uploadAny(req, res, (err) => {
+            if (err) return next(err);
+            if (!req.files) req.files = [];
+
+            if (req.files.length > maxCount) {
+                return next(new ApiError(`لا يمكن رفع أكثر من ${maxCount} صور في الطلب الواحد`, 400));
+            }
+
+            next();
+        });
+    };
+};

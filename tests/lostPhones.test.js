@@ -11,6 +11,7 @@ import ApiError from "../src/utils/ApiError.js";
 import { createLostPhoneSchema } from "../src/validations/lostPhones/createLostPhone.js";
 import { getLostPhonesSchema } from "../src/validations/lostPhones/getLostPhones.js";
 import { getLostPhonesDashboardSchema } from "../src/validations/lostPhones/getLostPhonesDashboard.js";
+import { getMyLostPhonesSchema } from "../src/validations/lostPhones/getMyLostPhones.js";
 import { updateLostPhoneSchema } from "../src/validations/lostPhones/updateLostPhone.js";
 import { updateLostPhoneStatusSchema } from "../src/validations/lostPhones/updateLostPhoneStatus.js";
 
@@ -18,9 +19,11 @@ import { updateLostPhoneStatusSchema } from "../src/validations/lostPhones/updat
 import { createLostPhone } from "../src/controller/lostPhones/createLostPhone.controller.js";
 import { getLostPhones } from "../src/controller/lostPhones/getLostPhones.controller.js";
 import { getLostPhonesDashboard } from "../src/controller/lostPhones/getLostPhonesDashboard.controller.js";
+import { getMyLostPhones } from "../src/controller/lostPhones/getMyLostPhones.controller.js";
 import { getLostPhoneById } from "../src/controller/lostPhones/getLostPhoneById.controller.js";
 import { updateLostPhone } from "../src/controller/lostPhones/updateLostPhone.controller.js";
 import { updateLostPhoneStatus } from "../src/controller/lostPhones/updateLostPhoneStatus.controller.js";
+import { deleteLostPhone } from "../src/controller/lostPhones/deleteLostPhone.controller.js";
 
 let server;
 let baseUrl;
@@ -82,10 +85,12 @@ const createMockSupabaseBuilder = (result = { data: null, error: null, count: 0 
         update: () => builder,
         delete: () => builder,
         eq: () => builder,
+        in: () => builder,
         or: () => builder,
         ilike: () => builder,
         gte: () => builder,
         lte: () => builder,
+        lt: () => builder,
         order: () => builder,
         range: async () => ({
             data: result.data || [],
@@ -524,10 +529,12 @@ describe("4. Lost Phones Update & Ownership Checks", () => {
             phone_images: [],
         };
 
-        let callCount = 0;
-        supabase.from = () => {
-            callCount++;
-            if (callCount === 1) return createMockSupabaseBuilder({ data: existingReport });
+        let lostPhonesCalls = 0;
+        supabase.from = (table) => {
+            if (table === "phone_images") return createMockSupabaseBuilder({ data: [] });
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            lostPhonesCalls++;
+            if (lostPhonesCalls === 1) return createMockSupabaseBuilder({ data: existingReport });
             return createMockSupabaseBuilder({ data: updatedReport });
         };
 
@@ -556,10 +563,12 @@ describe("4. Lost Phones Update & Ownership Checks", () => {
             phone_images: [],
         };
 
-        let callCount = 0;
-        supabase.from = () => {
-            callCount++;
-            if (callCount === 1) return createMockSupabaseBuilder({ data: existingReport });
+        let lostPhonesCalls = 0;
+        supabase.from = (table) => {
+            if (table === "phone_images") return createMockSupabaseBuilder({ data: [] });
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            lostPhonesCalls++;
+            if (lostPhonesCalls === 1) return createMockSupabaseBuilder({ data: existingReport });
             return createMockSupabaseBuilder({ data: updatedReport });
         };
 
@@ -753,6 +762,312 @@ describe("7. Lost Phones Dashboard for Admin", () => {
         assert.equal(res.statusCode, 200);
         assert.equal(res.jsonData.results.length, 3);
         assert.equal(res.jsonData.pagination.total, 3);
+    });
+
+    supabase.from = originalFrom;
+});
+
+describe("8. Lost Phone Images Update & Deletion Logic", () => {
+    const originalFrom = supabase.from;
+
+    test("updateLostPhone rejects deleting image that does not belong to report with 400", async () => {
+        const existingReport = { id: 10, brand: "Apple", created_by: "owner-1" };
+        const currentImages = [{ id: 101, phone_id: 10, image_url: "url1" }];
+
+        supabase.from = (table) => {
+            if (table === "lost_phones") return createMockSupabaseBuilder({ data: existingReport });
+            if (table === "phone_images") return createMockSupabaseBuilder({ data: currentImages });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "10" },
+            body: { delete_image_ids: [999] },
+        });
+
+        await updateLostPhone(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+        assert.ok(err.message.includes("999"));
+    });
+
+    test("updateLostPhone deletes specific image and keeps remaining images", async () => {
+        const existingReport = { id: 10, brand: "Apple", created_by: "owner-1" };
+        const currentImages = [
+            { id: 101, phone_id: 10, image_url: "http://example.com/phones/10/img1.webp", is_primary: true },
+            { id: 102, phone_id: 10, image_url: "http://example.com/phones/10/img2.webp", is_primary: false },
+        ];
+        const remainingImages = [
+            { id: 102, phone_id: 10, image_url: "http://example.com/phones/10/img2.webp", is_primary: true },
+        ];
+
+        let deleteCalled = false;
+        supabase.from = (table) => {
+            if (table === "lost_phones") return createMockSupabaseBuilder({ data: existingReport });
+            if (table === "phone_images") {
+                const builder = createMockSupabaseBuilder({ data: currentImages });
+                builder.delete = () => {
+                    deleteCalled = true;
+                    return builder;
+                };
+                builder.range = async () => ({ data: remainingImages });
+                builder.order = () => createMockSupabaseBuilder({ data: remainingImages });
+                return builder;
+            }
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "10" },
+            body: { delete_image_ids: [101] },
+        });
+
+        await updateLostPhone(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(deleteCalled, true);
+    });
+
+    test("updateLostPhone rejects total images exceeding limit of 5 with 400", async () => {
+        const existingReport = { id: 10, brand: "Apple", created_by: "owner-1" };
+        const currentImages = [
+            { id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }
+        ];
+
+        supabase.from = (table) => {
+            if (table === "lost_phones") return createMockSupabaseBuilder({ data: existingReport });
+            if (table === "phone_images") return createMockSupabaseBuilder({ data: currentImages });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "10" },
+            files: [{ buffer: createValidJpegBuffer() }],
+            body: {},
+        });
+
+        await updateLostPhone(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+    });
+
+    test("updateLostPhone rejects updating soft-deleted report with 404", async () => {
+        const deletedReport = { id: 10, brand: "Apple", created_by: "owner-1", is_deleted: true };
+
+        supabase.from = () => createMockSupabaseBuilder({ data: deletedReport });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "10" },
+            body: { color: "أحمر" },
+        });
+
+        await updateLostPhone(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 404);
+    });
+
+    test("updateLostPhone with replace_images: true targets all existing images for deletion", async () => {
+        const existingReport = { id: 10, brand: "Apple", created_by: "owner-1" };
+        const currentImages = [
+            { id: 1, phone_id: 10, image_url: "url1", is_primary: true },
+            { id: 2, phone_id: 10, image_url: "url2", is_primary: false },
+        ];
+
+        let deletedIdsPassed = null;
+        supabase.from = (table) => {
+            if (table === "lost_phones") return createMockSupabaseBuilder({ data: existingReport });
+            if (table === "phone_images") {
+                const builder = createMockSupabaseBuilder({ data: currentImages });
+                builder.in = (col, val) => {
+                    deletedIdsPassed = val;
+                    return builder;
+                };
+                builder.delete = () => builder;
+                builder.range = async () => ({ data: [] });
+                builder.order = () => createMockSupabaseBuilder({ data: [] });
+                return builder;
+            }
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "10" },
+            body: { replace_images: "true" },
+        });
+
+        await updateLostPhone(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.deepEqual(deletedIdsPassed, [1, 2]);
+    });
+
+    supabase.from = originalFrom;
+});
+
+describe("9. My Reports (GET /api/lost-phones/my-reports)", () => {
+    const originalFrom = supabase.from;
+
+    test("getMyLostPhonesSchema parses valid pagination and status filters", async () => {
+        const valid = await getMyLostPhonesSchema.parseAsync({
+            page: "2",
+            limit: "20",
+            status: "found",
+        });
+        assert.equal(valid.page, 2);
+        assert.equal(valid.limit, 20);
+        assert.equal(valid.status, "found");
+    });
+
+    test("getMyLostPhones returns reports created by current user only and excludes deleted", async () => {
+        const myReports = [
+            { id: 10, brand: "Apple", created_by: "user-123", is_deleted: false, phone_images: [] },
+            { id: 11, brand: "Samsung", created_by: "user-123", is_deleted: false, phone_images: [] },
+        ];
+
+        let queriedCreatedBy = null;
+        let queriedIsDeleted = null;
+
+        supabase.from = () => {
+            const builder = createMockSupabaseBuilder({ data: myReports, count: 2 });
+            builder.eq = (col, val) => {
+                if (col === "created_by") queriedCreatedBy = val;
+                if (col === "is_deleted") queriedIsDeleted = val;
+                return builder;
+            };
+            return builder;
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "user-123", role: "user" },
+            query: { page: 1, limit: 10 },
+        });
+
+        await getMyLostPhones(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.length, 2);
+        assert.equal(queriedCreatedBy, "user-123");
+        assert.equal(queriedIsDeleted, false);
+    });
+
+    supabase.from = originalFrom;
+});
+
+describe("10. Lost Phone Soft Delete (DELETE /api/lost-phones/:id)", () => {
+    const originalFrom = supabase.from;
+
+    test("deleteLostPhone allows report owner to soft delete report", async () => {
+        const existingReport = { id: 70, brand: "Apple", created_by: "owner-1", is_deleted: false };
+        const updatedReport = { ...existingReport, is_deleted: true };
+
+        let updatePayload = null;
+        supabase.from = (table) => {
+            if (table === "lost_phones") {
+                const builder = createMockSupabaseBuilder({ data: existingReport });
+                builder.update = (payload) => {
+                    updatePayload = payload;
+                    return createMockSupabaseBuilder({ data: updatedReport });
+                };
+                return builder;
+            }
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "70" },
+        });
+
+        await deleteLostPhone(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.is_deleted, true);
+        assert.equal(updatePayload.is_deleted, true);
+    });
+
+    test("deleteLostPhone allows admin to soft delete any report", async () => {
+        const existingReport = { id: 71, brand: "Google", created_by: "owner-other", is_deleted: false };
+        const updatedReport = { ...existingReport, is_deleted: true };
+
+        supabase.from = (table) => {
+            if (table === "lost_phones") {
+                const builder = createMockSupabaseBuilder({ data: existingReport });
+                builder.update = () => createMockSupabaseBuilder({ data: updatedReport });
+                return builder;
+            }
+            if (table === "audit_logs") return createMockSupabaseBuilder({ data: {} });
+            return createMockSupabaseBuilder({ data: {} });
+        };
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "admin-1", role: "admin" },
+            params: { id: "71" },
+        });
+
+        await deleteLostPhone(req, res, next);
+        assert.equal(getNext(), null);
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonData.results.is_deleted, true);
+    });
+
+    test("deleteLostPhone prevents non-owner shop from deleting report with 403", async () => {
+        const existingReport = { id: 72, brand: "Apple", created_by: "owner-1", is_deleted: false };
+
+        supabase.from = () => createMockSupabaseBuilder({ data: existingReport });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "intruder-user", role: "user" },
+            params: { id: "72" },
+        });
+
+        await deleteLostPhone(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 403);
+    });
+
+    test("deleteLostPhone rejects already deleted report with 400", async () => {
+        const alreadyDeletedReport = { id: 73, brand: "Apple", created_by: "owner-1", is_deleted: true };
+
+        supabase.from = () => createMockSupabaseBuilder({ data: alreadyDeletedReport });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "owner-1", role: "user" },
+            params: { id: "73" },
+        });
+
+        await deleteLostPhone(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 400);
+        assert.ok(err.message.includes("مسبقاً"));
+    });
+
+    test("getLostPhoneById hides soft-deleted report from regular users with 404", async () => {
+        const deletedReport = { id: 75, brand: "Nokia", status: "lost", created_by: "owner-1", is_deleted: true };
+
+        supabase.from = () => createMockSupabaseBuilder({ data: deletedReport });
+
+        const { req, res, next, getNext } = createMockReqRes({
+            user: { id: "regular-user", role: "user" },
+            params: { id: "75" },
+        });
+
+        await getLostPhoneById(req, res, next);
+        const err = getNext();
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.statusCode, 404);
     });
 
     supabase.from = originalFrom;
