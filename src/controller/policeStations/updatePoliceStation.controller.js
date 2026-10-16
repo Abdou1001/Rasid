@@ -20,10 +20,10 @@ export const updatePoliceStation = AsyncHandler(async (req, res, next) => {
 
     const { station_name, area, phone_number, address, notes } = req.body;
 
-    // 2. التحقق من وجود السجل في قاعدة البيانات
+    // 2. التحقق من وجود السجل في قاعدة البيانات بجلب المعرف فقط للسرعة والكفاءة
     const { data: existingStation, error: checkError } = await supabase
         .from("police_stations")
-        .select("*")
+        .select("id")
         .eq("id", stationId)
         .maybeSingle();
 

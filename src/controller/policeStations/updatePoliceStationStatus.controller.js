@@ -17,10 +17,10 @@ export const updatePoliceStationStatus = AsyncHandler(async (req, res, next) => 
         return next(new ApiError("معرف قسم الشرطة غير صالح", 400));
     }
 
-    // 2. التحقق من وجود السجل في قاعدة البيانات
+    // 2. التحقق من وجود السجل في قاعدة البيانات بجلب الحقول الأساسية فقط للسرعة والكفاءة
     const { data: existingStation, error: checkError } = await supabase
         .from("police_stations")
-        .select("*")
+        .select("id, is_active")
         .eq("id", stationId)
         .maybeSingle();
 
